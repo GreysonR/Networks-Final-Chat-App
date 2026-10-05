@@ -10,7 +10,7 @@ The server uses the port `18747` by default (per assignment spec), which cannot 
 - Run a client instance: `cargo run -p client -- 127.0.0.1`
 
 # Client Commands
-`newuser [username] [password]`: Creates a new username with the given username and password.
-`login [username] [password]`: Logs into an existing user
-`send [message]`: Sends the message to the server
-`logout`: Closes the connection & logs out
+- `newuser [username] [password]`: Creates a new username with the given username and password.
+- `login [username] [password]`: Logs into an existing user
+- `send [message]`: Sends the message to the server
+- `logout`: Closes the connection & logs out
