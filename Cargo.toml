@@ -1,0 +1,6 @@
+[workspace]
+resolver = "3"
+members = ["server", "client"] # todo: add client
+
+[workspace.dependencies]
+tokio = { version = "1.53.2", features = ["full"] }
