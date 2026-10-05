@@ -3,8 +3,6 @@ use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::Command::{Logout, NewUser};
-
 // const SERVER_ADDRESS: &str = "127.0.0.1";
 const SERVER_PORT: u32 = 18747;
 const BUFFER_SIZE: usize = 256;
