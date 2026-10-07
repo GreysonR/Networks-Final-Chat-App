@@ -4,4 +4,3 @@ members = ["server", "client"] # todo: add client
 
 [workspace.dependencies]
 tokio = { version = "1.53.2", features = ["full"] }
-tokio-util = { version = "0.7", features = ["rt"] }

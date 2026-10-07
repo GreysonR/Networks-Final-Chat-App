@@ -5,8 +5,7 @@
  * Handles all server logic, such as creating the socket, reading + parsing data from the socket, saving user info, and emitting messages back to clients
  */
 use std::sync::Arc;
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpSocket, TcpListener, TcpStream}, signal};
-use tokio_util::sync::CancellationToken;
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpSocket, TcpListener, TcpStream}};
 
 mod db;
 use db::*;
