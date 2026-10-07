@@ -121,7 +121,7 @@ async fn main() -> Result<(), std::io::Error> {
 		}
 	});
 
-	// Wait for tasks to finish; todo: handle errors here
+	// Wait for tasks to finish; todo: move within loop and select between sending / receiving
 	tokio::select! {
 		_ = &mut send_handle => {
 			recv_handle.abort();
@@ -130,8 +130,6 @@ async fn main() -> Result<(), std::io::Error> {
 			send_handle.abort();
 		}
 	}
-
-
 
 	Ok(())
 }

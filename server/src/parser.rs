@@ -1,3 +1,10 @@
+/**
+ * October 6 2026
+ * Greyson Rockwell
+ * 
+ * Parses messages sent by clients into commands for the server
+ */
+
 #[derive(Debug)]
 pub enum Command {
 	NewUser(String, String),
