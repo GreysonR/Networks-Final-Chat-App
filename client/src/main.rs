@@ -5,7 +5,7 @@
  * Handles all client logic, such as connecting to the server, parsing user inputs, and running user inputs
  */
 
-use std::io;
+use std::{io, sync::{Arc, Mutex}};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -22,7 +22,7 @@ async fn get_arg_server_address() -> String {
 	let mut args = std::env::args();
 	let _ = args.next(); // discard program name
 
-	let server_address = args.next().expect("Useage: client serverName");
+	let server_address = args.next().expect("Usage: client serverName");
 	let full_addr = format_addr(&server_address, SERVER_PORT);
 	let _ = tokio::net::lookup_host(&full_addr).await.expect(&format!("Host {} not found", full_addr));
 
@@ -65,10 +65,18 @@ async fn main() -> Result<(), std::io::Error> {
 
 	println!("My chat room client. Version One.\n");
 
+	let disconnected = Arc::new(Mutex::new(false));
+	let disconnected_send = Arc::clone(&disconnected);
+	let disconnected_recv = Arc::clone(&disconnected);
+
 
 	// Reading user input
 	let mut send_handle = tokio::spawn(async move  {
 		loop {
+			if *disconnected_send.lock().unwrap() == true {
+				break;
+			}
+
 			// Wait for + read input from terminal
 			let command = read_input();
 			if command.is_none() {
@@ -100,32 +108,45 @@ async fn main() -> Result<(), std::io::Error> {
 				Command::Logout => "logout".to_string()
 				// _ => continue 'l // ignore unimplemented commands
 			};
-			let _ = write_stream.write_all(msg.as_bytes()).await;
+			let result = write_stream.write_all(msg.as_bytes()).await;
+			if result.is_err() {
+				println!("Disconnected.");
+				break;
+			}
 		}
 	});
 	let mut recv_handle = tokio::spawn(async move {
 		loop {
-			let mut buf = [0u8; BUFFER_SIZE];			
-			let res = read_stream.read(&mut buf).await;
-			if res.is_err() {
-				println!("Error reading stream: {:?}", res.unwrap_err());
-				continue;
+			if *disconnected_recv.lock().unwrap() == true {
+				break;
 			}
 
-			let n = res.unwrap();
-			if n == 0 {
-				break; // peer closed connection
+			let mut buf = [0u8; BUFFER_SIZE];			
+			let res = read_stream.read(&mut buf).await;
+
+			match res {
+				Ok(0) => {
+					println!("Disconnected.");
+					break; // peer closed connection
+				}
+				Ok(n) => {
+					println!("{}", String::from_utf8_lossy(&buf[..n])); // print whatever server sent client
+				}
+				Err(e) => {
+					println!("Error reading stream: {}", e);
+				}
 			}
-			println!("{}", String::from_utf8_lossy(&buf[..n])); // print whatever server sent client
 		}
 	});
 
 	// Wait for tasks to finish; todo: move within loop and select between sending / receiving
 	tokio::select! {
 		_ = &mut send_handle => {
+			*disconnected.lock().unwrap() = true;
 			recv_handle.abort();
 		}
 		_ = &mut recv_handle => {
+			*disconnected.lock().unwrap() = true;
 			send_handle.abort();
 		}
 	}
