@@ -6,10 +6,16 @@
  */
 
 #[derive(Debug)]
+pub enum SendTarget {
+	All,
+	User(String),
+}
+
+#[derive(Debug)]
 pub enum Command {
 	NewUser(String, String),
 	Login(String, String),
-	Send(String),
+	Send(SendTarget, String),
 	Logout,
 }
 
@@ -21,7 +27,8 @@ pub fn parse_command(input: &str) -> Option<Command> {
 	match (name.to_lowercase().as_str(), args.as_slice()) {
 		("newuser", [username, password]) => Some(Command::NewUser(username.to_string(), password.to_string())),
 		("login", [username, password]) => Some(Command::Login(username.to_string(), password.to_string())),
-		("send", _) => Some(Command::Send(rest.trim().to_string())),
+		("send", ["all", msg @ ..]) => Some(Command::Send(SendTarget::All, msg.join(" ").trim().to_string())),
+		("send", [username, msg @ ..]) => Some(Command::Send(SendTarget::User(username.to_string()), msg.join(" ").trim().to_string())),
 		("logout", []) => Some(Command::Logout),
 		_ => None,
 	}

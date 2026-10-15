@@ -39,7 +39,7 @@ fn create_socket(address: &str, port: u32) -> Result<TcpListener, std::io::Error
 async fn main() -> Result<(), std::io::Error> {
 	let users = Users::new(USER_FILENAME);
 
-	println!("My chat room server. Version One.\n");
+	println!("My chat room server. Version Two.\n");
 	
 	handle_requests(users).await;
 
@@ -107,7 +107,7 @@ async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Res
 				conn_username = username;
 				break 'l;
 			},
-			Logout|Send(_) => {
+			Logout|Send(_, _) => {
 				let _ = stream.write_all("Denied. Please login first.".as_bytes()).await;
 			},
 		};
@@ -126,10 +126,25 @@ async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Res
 
 		use Command::*;
 		match command {
-			Send(msg) => {
+			Send(target, msg) => {
+				// todo: send to target
+				// "send to target" is doing a lot of heavy lifting here because that's the entire difficult part of V2
+				
+				match target {
+					SendTarget::All => {
+
+					}
+					SendTarget::User(target_username) => {
+						if !users.contains(&target_username) {
+							let _ = stream.write_all(format!("Invalid username. User may be offline or misspelled.").as_bytes()).await;
+							continue 'l;
+						}
+						println!("{} (to {}): {}", conn_username, target_username, msg);
+					}
+				}
+
 				// V1: just echo message back
 				let _ = stream.write_all(format!("{}: {}", conn_username, msg).as_bytes()).await;
-				println!("{}: {}", conn_username, msg);
 			},
 			Logout => {
 				// V1: don't need to worry about cleaning up pipes or anything, just kick out of loop + end connection

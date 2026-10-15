@@ -63,7 +63,7 @@ async fn main() -> Result<(), std::io::Error> {
 	let stream = TcpStream::connect(format_addr(&server_address, SERVER_PORT)).await.expect("Failed to connect to server");
 	let (mut read_stream, mut write_stream) = stream.into_split();
 
-	println!("My chat room client. Version One.\n");
+	println!("My chat room client. Version Two.\n");
 
 	let disconnected = Arc::new(Mutex::new(false));
 	let disconnected_send = Arc::clone(&disconnected);
