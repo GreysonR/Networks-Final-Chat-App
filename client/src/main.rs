@@ -110,7 +110,7 @@ async fn main() -> Result<(), std::io::Error> {
 			};
 			let result = write_stream.write_all(msg.as_bytes()).await;
 			if result.is_err() {
-				println!("Disconnected.");
+				println!("Disconnected. Enter to exit. ");
 				break;
 			}
 		}
@@ -126,8 +126,8 @@ async fn main() -> Result<(), std::io::Error> {
 
 			match res {
 				Ok(0) => {
-					println!("Disconnected.");
-					break; // peer closed connection
+				println!("Disconnected. Enter to exit. ");
+						break; // peer closed connection
 				}
 				Ok(n) => {
 					println!("{}", String::from_utf8_lossy(&buf[..n])); // print whatever server sent client
