@@ -78,7 +78,6 @@ async fn main() -> Result<(), std::io::Error> {
 			let command = command.unwrap();
 
 			// Send a command
-			// todo: handle errors from write_all's
 			let msg = match command {
 				Command::Send(msg) => {
 					format!("send {msg}")

@@ -63,8 +63,10 @@ async fn handle_requests(users: Users) {
 
 
 async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Result<()> {
+	let mut conn_username = String::new(); // this functions as a unique user ID
+
 	// Prelogin: limited set of functionality, as you won't have a User account in the system. It's a bit redundant, but necessary
-	loop {
+	'l: loop {
 		let mut buffer = [0u8; BUFFER_SIZE];
 		let n = stream.read(&mut buffer).await?;
 		if n == 0 { return Ok(()); } // peer closed the connection (EOF)
@@ -100,14 +102,46 @@ async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Res
 				
 				let _ = stream.write_all("login confirmed".as_bytes()).await;
 				println!("{} login", username);
-				// todo: actually log in
+
+				users.insert(&username, &password); // note: this takes a lock on a mutex; be careful of deadlock
+				conn_username = username;
+				break 'l;
 			},
 			Logout|Send(_) => {
 				let _ = stream.write_all("Denied. Please login first.".as_bytes()).await;
 			},
-		}
+		};
 	}
 
 	// After login: Full command access
-	// loop {}
+	'l: loop {
+		let mut buffer = [0u8; BUFFER_SIZE];
+		let n = stream.read(&mut buffer).await?;
+		if n == 0 { return Ok(()); } // peer closed the connection (EOF)
+
+		let text = String::from_utf8_lossy(&buffer[..n]).into_owned();
+		let command = parse_command(&text);
+		if command.is_none() { continue; }
+		let command = command.unwrap();
+
+		use Command::*;
+		match command {
+			Send(msg) => {
+				// V1: just echo message back
+				let _ = stream.write_all(format!("{}: {}", conn_username, msg).as_bytes()).await;
+				println!("{}: {}", conn_username, msg);
+			},
+			Logout => {
+				// V1: don't need to worry about cleaning up pipes or anything, just kick out of loop + end connection
+				println!("{} logout", conn_username);
+				let _ = stream.write_all(format!("{} left.", conn_username).as_bytes()).await;
+				break 'l;
+			},
+			Login(_, _)|NewUser(_, _) => {
+				let _ = stream.write_all("Denied. Please login first.".as_bytes()).await;
+			},
+		};
+	}
+
+	Ok(())
 }
