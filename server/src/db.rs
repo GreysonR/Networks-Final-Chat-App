@@ -29,7 +29,10 @@ pub struct Users {
 }
 impl Users {
 	fn parse_file(filename: &str) -> Self {
-		let contents = fs::read_to_string(filename).expect(&format!("Failed to read file {filename}"));
+		let contents = match fs::read_to_string(filename) {
+			Ok(data) => data,
+			Err(_) => String::new(), // Assume file doesn't exist; file will be created on save
+		};
 		let mut users = HashMap::new();
 		let contents = contents
 			.lines()
