@@ -29,12 +29,27 @@ async fn get_arg_server_address() -> String {
 	server_address
 }
 
+
 #[derive(Debug)]
-enum Command {
+pub enum Command {
 	NewUser(String, String),
 	Login(String, String),
 	Send(String),
 	Logout,
+}
+
+pub fn parse_command(input: &str) -> Option<Command> {
+	let input = input.trim();
+	let (name, rest) = input.split_once(" ").unwrap_or((input, ""));
+	let args: Vec<&str> = rest.split(" ").collect();
+
+	match (name.to_lowercase().as_str(), args.as_slice()) {
+		("newuser", [username, password]) => Some(Command::NewUser(username.to_string(), password.to_string())),
+		("login", [username, password]) => Some(Command::Login(username.to_string(), password.to_string())),
+		("send", [target, msg @ ..]) => Some(Command::Send(target.to_string() + msg.join(" ").trim())),
+		("logout", []) => Some(Command::Logout),
+		_ => None,
+	}
 }
 fn read_input() -> Option<Command> {
 	let stdin = io::stdin();
@@ -42,18 +57,8 @@ fn read_input() -> Option<Command> {
 	// Read input
 	let mut buffer = String::new();
 	let _ = stdin.read_line(&mut buffer);
-	let input = buffer.trim();
 	
-	let (name, rest) = input.split_once(" ").unwrap_or((input, ""));
-	let args: Vec<&str> = rest.split_whitespace().collect();
-
-	match (name.to_lowercase().as_str(), args.as_slice()) {
-		("newuser", [username, password]) => Some(Command::NewUser(username.to_string(), password.to_string())),
-		("login", [username, password]) => Some(Command::Login(username.to_string(), password.to_string())),
-		("send", _) => Some(Command::Send(rest.trim().to_string())),
-		("logout", []) => Some(Command::Logout),
-		_ => None,
-	}
+	parse_command(&buffer)
 }
 
 #[tokio::main]
@@ -126,8 +131,8 @@ async fn main() -> Result<(), std::io::Error> {
 
 			match res {
 				Ok(0) => {
-				println!("Disconnected. Enter to exit. ");
-						break; // peer closed connection
+					println!("Disconnected. Enter to exit. ");
+					break; // peer closed connection
 				}
 				Ok(n) => {
 					println!("{}", String::from_utf8_lossy(&buf[..n])); // print whatever server sent client

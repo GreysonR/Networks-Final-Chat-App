@@ -7,18 +7,20 @@
 
 
 use std::{fs, collections::HashMap, sync::{Arc, Mutex}};
-
+use tokio::net::tcp::OwnedWriteHalf;
 
 pub struct User {
 	pub username: String,
 	pub password: String,
-	// pub socket: Stream
+
+	pub socket_write: Option<Arc<Mutex<OwnedWriteHalf>>>,
 }
 impl User {
-	pub fn new(username: &str, password: &str) -> Self {
+	pub fn new(username: &str, password: &str, socket_write: Option<Arc<Mutex<OwnedWriteHalf>>>) -> Self {
 		Self {
 			username: username.to_string().trim().to_string(),
 			password: password.to_string().trim().to_string(),
+			socket_write,
 		}
 	}
 }
@@ -45,7 +47,7 @@ impl Users {
 		for user_data in contents {
 			let (username, password) = user_data;
 
-			let user = User::new(username, password);
+			let user = User::new(username, password, None);
 			users.insert(username.to_string(), Arc::new(user));
 		}
 
@@ -69,10 +71,17 @@ impl Users {
 	}
 	// pub fn is_online(&self, username: &str) -> bool {}
 
-	pub fn insert(&self, username: &str, password: &str) {
+	pub fn insert(&self, username: &str, password: &str, tcp_write: Option<OwnedWriteHalf>) {
+		let tcp_write = tcp_write.map(|stream| Arc::new(Mutex::new(stream)));
 		self.users.lock().unwrap()
-			.insert(username.to_string(), Arc::new(User::new(username, password)));
+			.insert(username.to_string(), Arc::new(User::new(username, password, tcp_write)));
 		self.save();
+	}
+
+	pub async fn iter_keys(&self, method: impl AsyncFn(&String) -> ()) {
+		for key in self.users.lock().unwrap().keys() {
+			method(key).await;
+		}
 	}
 
 	fn save(&self) {

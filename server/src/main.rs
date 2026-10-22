@@ -5,6 +5,10 @@
  * Handles all server logic, such as creating the socket, reading + parsing data from the socket, saving user info, and emitting messages back to clients
  */
 use std::sync::Arc;
+use std::io::{Error, ErrorKind};
+use std::{error, fmt};
+use std::fmt::Display;
+
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpSocket, TcpListener, TcpStream}};
 
 mod db;
@@ -62,13 +66,31 @@ async fn handle_requests(users: Users) {
 }
 
 
-async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Result<()> {
-	let mut conn_username = String::new(); // this functions as a unique user ID
+#[derive(Debug)]
+struct SendError {
+	v: String,
+}
+impl SendError {
+	fn new() -> Self {
+		SendError { v: "Something went wrong".to_string() }
+	}
+}
+impl error::Error for SendError {}
+impl Display for SendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SendError: {}", self.v)
+    }
+}
+
+async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<()> {
+	let conn_username; // this functions as a unique user ID
+	let conn_passwd;
+	let (mut read_stream, mut write_stream) = stream.into_split();
 
 	// Prelogin: limited set of functionality, as you won't have a User account in the system. It's a bit redundant, but necessary
 	'l: loop {
 		let mut buffer = [0u8; BUFFER_SIZE];
-		let n = stream.read(&mut buffer).await?;
+		let n = read_stream.read(&mut buffer).await?;
 		if n == 0 { return Ok(()); } // peer closed the connection (EOF)
 
 		let text = String::from_utf8_lossy(&buffer[..n]).into_owned();
@@ -80,35 +102,40 @@ async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Res
 		match command {
 			NewUser(username, password) => 'm: {
 				if users.contains(&username) {
-					let _ = stream.write_all("Denied. User account already exists.".as_bytes()).await;
+					let _ = write_stream.write_all("Denied. User account already exists.".as_bytes()).await;
 					break 'm;
 				}
 
-				users.insert(&username, &password);
-				let _ = stream.write_all("New user account created. Please login.".as_bytes()).await;
+				users.insert(&username, &password, None);
+				let _ = write_stream.write_all("New user account created. Please login.".as_bytes()).await;
 				println!("New user account created");
 			},
 			Login(username, password) => 'm: {
 				if !users.contains(&username) {
-					let _ = stream.write_all("Denied. User name or password incorrect.".as_bytes()).await;
+					let _ = write_stream.write_all("Denied. User name or password incorrect.".as_bytes()).await;
 					break 'm;
 				}
 				
 				let user = users.get(&username).expect("Something went horribly wrong! Check Users::contains()");
 				if user.password != password {
-					let _ = stream.write_all("Denied. User name or password incorrect.".as_bytes()).await;
+					let _ = write_stream.write_all("Denied. User name or password incorrect.".as_bytes()).await;
+					break 'm;
+				}
+				if user.socket_write.is_some() {
+					let _ = write_stream.write_all("Denied. User is already logged in.".as_bytes()).await;
 					break 'm;
 				}
 				
-				let _ = stream.write_all("login confirmed".as_bytes()).await;
+				let _ = write_stream.write_all("login confirmed".as_bytes()).await;
 				println!("{} login", username);
 
-				users.insert(&username, &password); // note: this takes a lock on a mutex; be careful of deadlock
+				users.insert(&username, &password, Some(write_stream)); // note: this takes a lock on Users; be careful of deadlock
 				conn_username = username;
+				conn_passwd = password;
 				break 'l;
 			},
 			Logout|Send(_, _) => {
-				let _ = stream.write_all("Denied. Please login first.".as_bytes()).await;
+				let _ = write_stream.write_all("Denied. Please login first.".as_bytes()).await;
 			},
 		};
 	}
@@ -116,13 +143,38 @@ async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Res
 	// After login: Full command access
 	'l: loop {
 		let mut buffer = [0u8; BUFFER_SIZE];
-		let n = stream.read(&mut buffer).await?;
+		let n = read_stream.read(&mut buffer).await?;
 		if n == 0 { return Ok(()); } // peer closed the connection (EOF)
 
 		let text = String::from_utf8_lossy(&buffer[..n]).into_owned();
 		let command = parse_command(&text);
 		if command.is_none() { continue; }
 		let command = command.unwrap();
+
+
+		// Helper methods for sending messages
+		let get_write_stream = |username: &str| {
+			let cur_user = users.get(&username).unwrap().clone(); // User is currently logged in, so unwraps shouldn't fail
+			let write_stream = cur_user.socket_write.clone();
+			write_stream
+		};
+		let send_msg = async |username: &str, msg: &str| -> Result<(), SendError> {
+			let write_stream = match get_write_stream(&username) {
+				Some(v) => v,
+				None => { return Result::Err(SendError::new()) }
+			};
+			let mut write_stream = write_stream.lock().expect(&format!("Failed to get lock on target user ({})", username)); // expect will only fail if mutex is poisoned, which is bad enough to stop thread
+			let result = write_stream.write_all(format!("{}: {}", conn_username, msg).as_bytes()).await;
+			match result {
+				Ok(_) => Ok(()),
+				Err(_) => Result::Err(SendError::new())
+			}			
+		};
+		let broadcast_msg = async |msg: &str| {
+			users.iter_keys(async |username| {
+				send_msg(username, msg).await; // if there's any error, just move on to next client
+			}).await;
+		};
 
 		use Command::*;
 		match command {
@@ -132,31 +184,41 @@ async fn handle_client(mut stream: TcpStream, users: Arc<Users>) -> std::io::Res
 				
 				match target {
 					SendTarget::All => {
-
+						broadcast_msg(&msg);
+						println!("{} (to all): {}", conn_username, msg);
 					}
 					SendTarget::User(target_username) => {
 						if !users.contains(&target_username) {
-							let _ = stream.write_all(format!("Invalid username. User may be offline or misspelled.").as_bytes()).await;
+							if send_msg(&conn_username, "Invalid username. User may be offline or misspelled.").await.is_err() {
+								break 'l; // closed connection
+							};
 							continue 'l;
 						}
+
+						if send_msg(&target_username, &format!("{}: {}", conn_username, msg)).await.is_err() {
+							break 'l; // closed connection
+						};
 						println!("{} (to {}): {}", conn_username, target_username, msg);
 					}
 				}
-
-				// V1: just echo message back
-				let _ = stream.write_all(format!("{}: {}", conn_username, msg).as_bytes()).await;
 			},
 			Logout => {
 				// V1: don't need to worry about cleaning up pipes or anything, just kick out of loop + end connection
+				broadcast_msg(&format!("{} left.", conn_username));
 				println!("{} logout", conn_username);
-				let _ = stream.write_all(format!("{} left.", conn_username).as_bytes()).await;
 				break 'l;
 			},
 			Login(_, _)|NewUser(_, _) => {
-				let _ = stream.write_all("Denied. Please login first.".as_bytes()).await;
+				if send_msg(&conn_username, "Denied. Please log out first.").await.is_err() {
+					break 'l; // closed connection
+				};
 			},
 		};
 	}
+
+
+	// Clear connection from user
+	users.insert(&conn_username, &conn_passwd, None);
 
 	Ok(())
 }
