@@ -84,7 +84,7 @@ impl Users {
 		self.save().await;
 	}
 
-	// Sends message `msg` to the user. Errors if the user is unknown or offline
+	// Sends message `msg` to the user. Errors if the user doesn't exist or is offline
 	pub async fn send(&self, to: &str, msg: &str) -> std::io::Result<()> {
 		let user = self.get(to).await
 			.ok_or_else(|| Error::new(ErrorKind::NotFound, "No such user"))?;
@@ -95,7 +95,7 @@ impl Users {
 		write.write_all(msg.as_bytes()).await
 	}
 
-	// Writes raw `msg` to every user. Users with errors (i.e. offline) are skipped
+	// Writes raw `msg` to every user. ignore_user can be optionally used to skip the sender of the broadcast. Users with errors (i.e. offline) are skipped
 	pub async fn broadcast(&self, msg: &str, ignore_user: Option<&String>) {
 		let names: Vec<String> = self.users.lock().await.keys().cloned().collect();
 		for username in names {
