@@ -115,7 +115,7 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 
 				break 'l;
 			},
-			Command::Logout | Command::Send(_, _) => {
+			Logout | Send(_, _) => {
 				let _ = write_stream.write_all("Denied. Please login first.".as_bytes()).await;
 			},
 		};
@@ -125,7 +125,7 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 	'l: loop {
 		let mut buffer = [0u8; BUFFER_SIZE];
 		let n = read_stream.read(&mut buffer).await?;
-		if n == 0 { break 'l; } // disconnected without logout: fall through to cleanup
+		if n == 0 { break 'l; } // peer disconnected
 
 		let text = String::from_utf8_lossy(&buffer[..n]).into_owned();
 		let Some(command) = parse_command(&text) else { continue };
