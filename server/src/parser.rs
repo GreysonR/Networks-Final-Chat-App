@@ -16,6 +16,7 @@ pub enum Command {
 	NewUser(String, String),
 	Login(String, String),
 	Send(SendTarget, String),
+	Who,
 	Logout,
 }
 
@@ -36,6 +37,7 @@ pub fn parse_command(input: &str) -> Option<Command> {
 			let target = if target.eq_ignore_ascii_case("all") { SendTarget::All } else { SendTarget::User(target.to_string()) };
 			Some(Command::Send(target, msg.to_string()))
 		},
+		("who", []) => Some(Command::Who),
 		("logout", []) => Some(Command::Logout),
 		_ => None,
 	}

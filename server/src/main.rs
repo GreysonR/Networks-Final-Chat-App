@@ -115,7 +115,7 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 
 				break 'l;
 			},
-			Logout | Send(_, _) => {
+			Logout | Who | Send(_, _) => {
 				let _ = write_stream.write_all("Denied. Please login first.".as_bytes()).await;
 			},
 		};
@@ -147,6 +147,12 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 					break 'l; // closed connection
 				}
 				println!("{conn_username} (to {target}): {msg}");
+			}
+			Who => {
+				let online_users = users.get_connected_users().await;
+				if users.send(&conn_username, &online_users.join(", ")).await.is_err() {
+					break 'l; // closed connection
+				}
 			}
 			Logout => {
 				break 'l;

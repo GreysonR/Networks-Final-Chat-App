@@ -99,7 +99,8 @@ async fn main() -> Result<(), std::io::Error> {
 				Command::Login(username, password) => {
 					format!("login {username} {password}")
 				},
-				Command::Logout => "logout".to_string()
+				Command::Who => "who".to_string(),
+				Command::Logout => "logout".to_string(),
 			};
 			let result = write_stream.write_all(msg.as_bytes()).await;
 			if result.is_err() {
