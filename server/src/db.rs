@@ -6,8 +6,8 @@
  */
 
 
-use std::{fs, collections::HashMap, sync::{Arc, Mutex}};
-use tokio::net::tcp::OwnedWriteHalf;
+use std::{fs, collections::HashMap, sync::Arc, io::{Error, ErrorKind}};
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
 
 pub struct User {
 	pub username: String,
@@ -59,34 +59,47 @@ impl Users {
 	pub fn new(filename: &str) -> Self {
 		Self::parse_file(filename)
 	}
-	pub fn get(&self, username: &str) -> Option<Arc<User>> {
-		self.users.lock().unwrap()
+	pub async fn get(&self, username: &str) -> Option<Arc<User>> {
+		self.users.lock().await
 			.get(username)
 			.map(|value| { Arc::clone(value) })
 	}
 
-	pub fn contains(&self, username: &str) -> bool {
-		self.users.lock().unwrap()
+	pub async fn contains(&self, username: &str) -> bool {
+		self.users.lock().await
 			.contains_key(username)
 	}
 	// pub fn is_online(&self, username: &str) -> bool {}
 
-	pub fn insert(&self, username: &str, password: &str, tcp_write: Option<OwnedWriteHalf>) {
+	pub async fn insert(&self, username: &str, password: &str, tcp_write: Option<OwnedWriteHalf>) {
 		let tcp_write = tcp_write.map(|stream| Arc::new(Mutex::new(stream)));
-		self.users.lock().unwrap()
+		self.users.lock().await
 			.insert(username.to_string(), Arc::new(User::new(username, password, tcp_write)));
-		self.save();
+		self.save().await;
 	}
 
-	pub async fn iter_keys(&self, method: impl AsyncFn(&String) -> ()) {
-		for key in self.users.lock().unwrap().keys() {
-			method(key).await;
+	// Sends message `msg` to the user. Errors if the user is unknown or offline.
+	pub async fn send(&self, to: &str, msg: &str) -> std::io::Result<()> {
+		let user = self.get(to).await
+			.ok_or_else(|| Error::new(ErrorKind::NotFound, "no such user"))?;
+		let write = user.socket_write.clone()
+			.ok_or_else(|| Error::new(ErrorKind::NotConnected, "user is offline"))?;
+
+		let mut write = write.lock().await;
+		write.write_all(msg.as_bytes()).await
+	}
+
+	// Writes raw `msg` to every user. Users with errors (i.e. offline) are skipped.
+	pub async fn broadcast(&self, msg: &str) {
+		let names: Vec<String> = self.users.lock().await.keys().cloned().collect();
+		for name in names {
+			let _ = self.send(&name, msg).await;
 		}
 	}
 
-	fn save(&self) {
+	async fn save(&self) {
 		let mut contents = String::new();
-		let users = self.users.lock().unwrap();
+		let users = self.users.lock().await;
 		for user in users.values() {
 			let username = &user.username;
 			let password = &user.password;

@@ -31,26 +31,48 @@ async fn get_arg_server_address() -> String {
 
 
 #[derive(Debug)]
+pub enum SendTarget {
+	All,
+	User(String),
+}
+impl std::fmt::Display for SendTarget {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			SendTarget::All => write!(f, "all"),
+			SendTarget::User(username) => write!(f, "{username}"),
+		}
+	}
+}
+#[derive(Debug)]
 pub enum Command {
 	NewUser(String, String),
 	Login(String, String),
-	Send(String),
+	Send(SendTarget, String),
 	Logout,
 }
 
 pub fn parse_command(input: &str) -> Option<Command> {
 	let input = input.trim();
+	if input == "send" { return Some(Command::Send(SendTarget::User(String::from(".")), String::new())); } // :(
 	let (name, rest) = input.split_once(" ").unwrap_or((input, ""));
-	let args: Vec<&str> = rest.split(" ").collect();
+	let args: Vec<&str> = rest.split_whitespace().collect();
 
 	match (name.to_lowercase().as_str(), args.as_slice()) {
 		("newuser", [username, password]) => Some(Command::NewUser(username.to_string(), password.to_string())),
 		("login", [username, password]) => Some(Command::Login(username.to_string(), password.to_string())),
-		("send", [target, msg @ ..]) => Some(Command::Send(target.to_string() + msg.join(" ").trim())),
+		("send", _) => {
+			let (target, msg) = rest.trim_start().split_once(" ")?;
+			let msg = msg.trim();
+			if msg.is_empty() { return None; }
+
+			let target = if target.eq_ignore_ascii_case("all") { SendTarget::All } else { SendTarget::User(target.to_string()) };
+			Some(Command::Send(target, msg.to_string()))
+		},
 		("logout", []) => Some(Command::Logout),
 		_ => None,
 	}
 }
+
 fn read_input() -> Option<Command> {
 	let stdin = io::stdin();
 
@@ -92,8 +114,8 @@ async fn main() -> Result<(), std::io::Error> {
 
 			// Send a command
 			let msg = match command {
-				Command::Send(msg) => {
-					format!("send {msg}")
+				Command::Send(target, msg) => {
+					format!("send {target} {msg}")
 				},
 				Command::NewUser(username, password) => {
 					if username.len() < 3 || username.len() > 32 {
