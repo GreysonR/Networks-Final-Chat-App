@@ -1,5 +1,5 @@
 /**
- * October 6 2026
+ * October 23 2026
  * Greyson Rockwell
  * 
  * Handles "DB" logic: Data structures for the users, parsing + writing to the users.txt file
@@ -30,6 +30,7 @@ pub struct Users {
 	users: Mutex<HashMap<String, Arc<User>>>,
 }
 impl Users {
+	// Helper method for reading & parsing a users file
 	fn parse_file(filename: &str) -> Self {
 		let contents = match fs::read_to_string(filename) {
 			Ok(data) => data,
@@ -56,21 +57,26 @@ impl Users {
 			users: Mutex::new(users)
 		}
 	}
+
 	pub fn new(filename: &str) -> Self {
 		Self::parse_file(filename)
 	}
+
+	// Gets a User by username
+	// Returns: Some(_) if user is found, None if not
 	pub async fn get(&self, username: &str) -> Option<Arc<User>> {
 		self.users.lock().await
 			.get(username)
 			.map(|value| { Arc::clone(value) })
 	}
 
+	// Check if the user exists
 	pub async fn contains(&self, username: &str) -> bool {
 		self.users.lock().await
 			.contains_key(username)
 	}
-	// pub fn is_online(&self, username: &str) -> bool {}
 
+	// Add a user to the db. Also saves users to disk
 	pub async fn insert(&self, username: &str, password: &str, tcp_write: Option<OwnedWriteHalf>) {
 		let tcp_write = tcp_write.map(|stream| Arc::new(Mutex::new(stream)));
 		self.users.lock().await
@@ -78,25 +84,40 @@ impl Users {
 		self.save().await;
 	}
 
-	// Sends message `msg` to the user. Errors if the user is unknown or offline.
+	// Sends message `msg` to the user. Errors if the user is unknown or offline
 	pub async fn send(&self, to: &str, msg: &str) -> std::io::Result<()> {
 		let user = self.get(to).await
-			.ok_or_else(|| Error::new(ErrorKind::NotFound, "no such user"))?;
+			.ok_or_else(|| Error::new(ErrorKind::NotFound, "No such user"))?;
 		let write = user.socket_write.clone()
-			.ok_or_else(|| Error::new(ErrorKind::NotConnected, "user is offline"))?;
+			.ok_or_else(|| Error::new(ErrorKind::NotConnected, "User is offline"))?;
 
 		let mut write = write.lock().await;
 		write.write_all(msg.as_bytes()).await
 	}
 
-	// Writes raw `msg` to every user. Users with errors (i.e. offline) are skipped.
-	pub async fn broadcast(&self, msg: &str) {
+	// Writes raw `msg` to every user. Users with errors (i.e. offline) are skipped
+	pub async fn broadcast(&self, msg: &str, ignore_user: Option<&String>) {
 		let names: Vec<String> = self.users.lock().await.keys().cloned().collect();
-		for name in names {
-			let _ = self.send(&name, msg).await;
+		for username in names {
+			if Some(&username) == ignore_user { continue; }
+			let _ = self.send(&username, msg).await;
 		}
 	}
 
+	// Returns a list of all users that are currently connected
+	pub async fn get_connected_users(&self) -> Vec<String> {
+		let names: Vec<String> = self.users.lock().await.keys().cloned().collect();
+		let mut users = Vec::new();
+		for username in names {
+			let Some(user) = self.get(&username).await else { continue };
+			if user.socket_write.is_some() {
+				users.push(username);
+			}
+		}
+		users
+	}
+
+	// Saves the users to disk
 	async fn save(&self) {
 		let mut contents = String::new();
 		let users = self.users.lock().await;

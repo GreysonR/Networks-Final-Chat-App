@@ -1,5 +1,5 @@
 /**
- * October 6 2026
+ * October 23 2026
  * Greyson Rockwell
  * 
  * Handles all client logic, such as connecting to the server, parsing user inputs, and running user inputs
@@ -9,6 +9,9 @@ use std::{io, sync::{Arc, Mutex}};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+
+mod parser;
+use parser::*;
 
 // const SERVER_ADDRESS: &str = "127.0.0.1";
 const SERVER_PORT: u32 = 18747;
@@ -30,53 +33,13 @@ async fn get_arg_server_address() -> String {
 }
 
 
-#[derive(Debug)]
-pub enum SendTarget {
-	All,
-	User(String),
-}
-impl std::fmt::Display for SendTarget {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			SendTarget::All => write!(f, "all"),
-			SendTarget::User(username) => write!(f, "{username}"),
-		}
-	}
-}
-#[derive(Debug)]
-pub enum Command {
-	NewUser(String, String),
-	Login(String, String),
-	Send(SendTarget, String),
-	Logout,
-}
 
-pub fn parse_command(input: &str) -> Option<Command> {
-	let input = input.trim();
-	if input == "send" { return Some(Command::Send(SendTarget::User(String::from(".")), String::new())); } // :(
-	let (name, rest) = input.split_once(" ").unwrap_or((input, ""));
-	let args: Vec<&str> = rest.split_whitespace().collect();
-
-	match (name.to_lowercase().as_str(), args.as_slice()) {
-		("newuser", [username, password]) => Some(Command::NewUser(username.to_string(), password.to_string())),
-		("login", [username, password]) => Some(Command::Login(username.to_string(), password.to_string())),
-		("send", _) => {
-			let (target, msg) = rest.trim_start().split_once(" ")?;
-			let msg = msg.trim();
-			if msg.is_empty() { return None; }
-
-			let target = if target.eq_ignore_ascii_case("all") { SendTarget::All } else { SendTarget::User(target.to_string()) };
-			Some(Command::Send(target, msg.to_string()))
-		},
-		("logout", []) => Some(Command::Logout),
-		_ => None,
-	}
-}
-
+// Reads input from stdin and parses it into a command.
+// This is a blocking operation unfortunately
+// Returns: Some(Command), or None if it fails to parse the input.
 fn read_input() -> Option<Command> {
 	let stdin = io::stdin();
 
-	// Read input
 	let mut buffer = String::new();
 	let _ = stdin.read_line(&mut buffer);
 	
@@ -92,27 +55,27 @@ async fn main() -> Result<(), std::io::Error> {
 
 	println!("My chat room client. Version Two.\n");
 
+	// Disconnected flag, which alerts each thread if the other has stopped. 
 	let disconnected = Arc::new(Mutex::new(false));
 	let disconnected_send = Arc::clone(&disconnected);
 	let disconnected_recv = Arc::clone(&disconnected);
 
 
-	// Reading user input
+	// Reading user input & sending to server
 	let mut send_handle = tokio::spawn(async move  {
 		loop {
-			if *disconnected_send.lock().unwrap() == true {
-				break;
-			}
+			if *disconnected_send.lock().unwrap() == true { break; }
 
 			// Wait for + read input from terminal
-			let command = read_input();
+			let command = read_input(); // this is a problematic blocking operation
+			if *disconnected_send.lock().unwrap() == true { break; } // don't print error message after user input if disconnected. Very hacky, but technically works
 			if command.is_none() {
 				println!("Invalid input");
 				continue;
 			}
 			let command = command.unwrap();
 
-			// Send a command
+			// Send the command. What's sent winds up being a reconstruction whatever was typed, but parsing is necessary for client-side input validation.
 			let msg = match command {
 				Command::Send(target, msg) => {
 					format!("send {target} {msg}")
@@ -133,15 +96,16 @@ async fn main() -> Result<(), std::io::Error> {
 					format!("login {username} {password}")
 				},
 				Command::Logout => "logout".to_string()
-				// _ => continue 'l // ignore unimplemented commands
 			};
 			let result = write_stream.write_all(msg.as_bytes()).await;
 			if result.is_err() {
 				println!("Disconnected. Enter to exit. ");
-				break;
+				break; // server closed connection
 			}
 		}
 	});
+	
+	// Printing server responses
 	let mut recv_handle = tokio::spawn(async move {
 		loop {
 			if *disconnected_recv.lock().unwrap() == true {
@@ -152,21 +116,22 @@ async fn main() -> Result<(), std::io::Error> {
 			let res = read_stream.read(&mut buf).await;
 
 			match res {
-				Ok(0) => {
+				Ok(0) => { // server closed connection
 					println!("Disconnected. Enter to exit. ");
-					break; // peer closed connection
+					break;
 				}
-				Ok(n) => {
-					println!("{}", String::from_utf8_lossy(&buf[..n])); // print whatever server sent client
+				Ok(n) => { // print whatever server sent client
+					println!("{}", String::from_utf8_lossy(&buf[..n])); 
 				}
 				Err(e) => {
-					println!("Error reading stream: {}", e);
+					println!("Error reading stream: {}", e); // hopefully this never happens
 				}
 			}
 		}
 	});
 
-	// Wait for tasks to finish; todo: move within loop and select between sending / receiving
+	// Wait for tasks to finish & try to close the other when one finishes first
+	// Problem: send_handle reads user input in a blocking way, so it can't exit until the user inputs something, requiring disconnected flag. However, this isn't worth fixing.
 	tokio::select! {
 		_ = &mut send_handle => {
 			*disconnected.lock().unwrap() = true;

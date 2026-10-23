@@ -1,5 +1,5 @@
 /**
- * October 6 2026
+ * October 23 2026
  * Greyson Rockwell
  * 
  * Handles all server logic, such as creating the socket, reading + parsing data from the socket, saving user info, and emitting messages back to clients
@@ -47,6 +47,7 @@ async fn main() -> Result<(), std::io::Error> {
 	Ok(())
 }
 
+// Waits for connections, then creates a new thread for each connection and hands responsibility off to handle_client
 async fn handle_requests(users: Users) {
 	let users = Arc::new(users);
 	let listener = create_socket(SERVER_ADDRESS, SERVER_PORT).expect("Failed to create socket");
@@ -62,13 +63,13 @@ async fn handle_requests(users: Users) {
 	}
 }
 
-
+// Handles everything for a single connection: Reading & responding to input
 async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<()> {
 	let conn_username;
 	let conn_passwd;
 	let (mut read_stream, mut write_stream) = stream.into_split();
 
-	// Prelogin
+	// Pre-login
 	'l: loop {
 		let mut buffer = [0u8; BUFFER_SIZE];
 		let n = read_stream.read(&mut buffer).await?;
@@ -106,10 +107,12 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 				let _ = write_stream.write_all("login confirmed".as_bytes()).await;
 				println!("{} login", username);
 
-				users.broadcast(&format!("{} joins.", username)).await;
+				users.broadcast(&format!("{} joins.", username), None).await; // need to broadcast this before connecting the new user so the new user doesn't get it
 				users.insert(&username, &password, Some(write_stream)).await;
+
 				conn_username = username;
 				conn_passwd = password;
+
 				break 'l;
 			},
 			Command::Logout | Command::Send(_, _) => {
@@ -130,7 +133,7 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 		use Command::*;
 		match command {
 			Send(SendTarget::All, msg) => {
-				users.broadcast(&format!("{conn_username}: {msg}")).await;
+				users.broadcast(&format!("{conn_username}: {msg}"), Some(&conn_username)).await;
 				println!("{conn_username} (to all): {msg}");
 			}
 			Send(SendTarget::User(target), msg) => {
@@ -159,6 +162,6 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 
 	// Clear connection from user
 	users.insert(&conn_username, &conn_passwd, None).await;
-	users.broadcast(&format!("{conn_username} left.")).await;
+	users.broadcast(&format!("{conn_username} left."), None).await;
 	Ok(())
 }
