@@ -78,6 +78,10 @@ async fn main() -> Result<(), std::io::Error> {
 			// Send the command. What's sent winds up being a reconstruction whatever was typed, but parsing is necessary for client-side input validation.
 			let msg = match command {
 				Command::Send(target, msg) => {
+					if msg.len() < 1 || msg.len() > 256 {
+						println!("Message can be between 1-256 characters.");
+						continue;
+					}
 					format!("send {target} {msg}")
 				},
 				Command::NewUser(username, password) => {
