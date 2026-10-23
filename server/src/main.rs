@@ -134,7 +134,7 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 		match command {
 			Send(SendTarget::All, msg) => {
 				users.broadcast(&format!("{conn_username}: {msg}"), Some(&conn_username)).await;
-				println!("{conn_username} (to all): {msg}");
+				println!("{conn_username}: {msg}");
 			}
 			Send(SendTarget::User(target), msg) => {
 				if !users.contains(&target).await {
@@ -149,7 +149,6 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 				println!("{conn_username} (to {target}): {msg}");
 			}
 			Logout => {
-				println!("{conn_username} logout");
 				break 'l;
 			}
 			Login(_, _) | NewUser(_, _) => {
@@ -161,6 +160,7 @@ async fn handle_client(stream: TcpStream, users: Arc<Users>) -> std::io::Result<
 	}
 
 	// Clear connection from user
+	println!("{conn_username} logout");
 	users.insert(&conn_username, &conn_passwd, None).await;
 	users.broadcast(&format!("{conn_username} left."), None).await;
 	Ok(())
